@@ -26,6 +26,8 @@ mod operations;
 #[cfg(test)]
 mod operations_tests;
 mod output;
+mod paths;
+mod platform;
 mod rfc3339;
 mod state;
 mod update;

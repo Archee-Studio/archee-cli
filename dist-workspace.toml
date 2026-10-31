@@ -5,9 +5,8 @@ members = ["cargo:."]
 [dist]
 cargo-dist-version = "0.33.1"
 ci = "github"
-# The Windows PR adds "powershell" to installers and "x86_64-pc-windows-msvc" to targets, then runs `dist generate`.
-installers = ["shell"]
-targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl"]
+installers = ["shell", "powershell"]
+targets = ["aarch64-apple-darwin", "x86_64-apple-darwin", "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", "x86_64-pc-windows-msvc"]
 checksum = "sha256"
 install-path = "~/.local/bin"
 install-updater = false

@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.99"
 name = "archee-cli"
-version = "11.19.0"
+version = "11.20.0"
 build = false
 include = [
     "/src/**",
@@ -44,6 +44,9 @@ features = [
     "derive",
     "env",
 ]
+
+[dependencies.dunce]
+version = "1.0.5"
 
 [dependencies.reqwest]
 version = "0.13.5"

@@ -38,4 +38,12 @@ cargo test -p archee-cli
 cargo clippy -p archee-cli --all-targets -- -D warnings
 ```
 
-Linux and macOS are supported; the worker relies on POSIX process groups.
+The Linux and macOS builds are supported. Windows is **beta** until a person has tested it on a real PC; CI runs the suite on Windows.
+
+## Windows
+
+- Scripts run in Windows PowerShell 5.1 (`powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command`, UTF-8 output), which ships with Windows. Git Bash is not needed. The server tells the agent the computer is Windows, so it writes PowerShell and Windows paths.
+- Stop uses `taskkill /T /F /PID`. A process that fully detached from its parent can survive it, so Stop is slightly weaker than the Unix process-group kill.
+- The served folder's identity is a digest of its normalized path, so a folder replaced under the same path is not detected, unlike the Unix device and inode check.
+- The binary is unsigned: Defender or SmartScreen may warn on first run.
+- Ctrl-C once drains, twice kills the running command, three times exits 130; closing the console counts as a Ctrl-C.

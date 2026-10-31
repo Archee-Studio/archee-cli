@@ -7,6 +7,7 @@ use std::path::Path;
 
 use crate::api::{ApiError, Client};
 use crate::output::{CliError, EXIT_AUTH, EXIT_USAGE};
+use crate::platform;
 use crate::state::{load_credential, load_session};
 use crate::users::{base_url, device_token, env_token};
 use crate::worker;
@@ -53,7 +54,11 @@ fn host_name() -> String {
 
 fn on_path(program: &str) -> bool {
     std::env::var_os("PATH").is_some_and(|paths| {
-        std::env::split_paths(&paths).any(|directory| directory.join(program).is_file())
+        std::env::split_paths(&paths).any(|directory| {
+            platform::program_files(program)
+                .iter()
+                .any(|name| directory.join(name).is_file())
+        })
     })
 }
 

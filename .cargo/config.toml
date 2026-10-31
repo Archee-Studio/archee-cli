@@ -1,0 +1,4 @@
+# cargo package drops workspace profiles, and cargo-dist builds with this one.
+[profile.dist]
+inherits = "release"
+lto = "thin"

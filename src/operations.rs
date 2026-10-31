@@ -5,19 +5,19 @@
 
 use std::fs;
 use std::io::{Read, Write};
-use std::os::unix::fs::MetadataExt;
 use std::path::{Component, Path, PathBuf};
 use std::process::Stdio;
 use std::time::Duration;
 
 use tokio::io::{AsyncRead, AsyncReadExt};
-use tokio::process::Command;
 use tokio::sync::watch;
 
 use crate::models::{
     FileAction, FileOperationRequest, GrepMatch, ListEntry, OperationPayload, OperationResult,
     ScriptRequest,
 };
+use crate::paths::{contained, windows_violation};
+use crate::platform;
 
 /// Set for scripts the agent runs here, so `archee` refuses account commands.
 pub(crate) const ON_COMPUTER_ENV: &str = "ARCHEE_ON_COMPUTER";
@@ -48,6 +48,13 @@ pub(crate) fn resolve(workdir: &Path, relative: &str) -> Result<PathBuf, Operati
     if relative.is_empty() || relative.contains('\0') {
         return fail("path must be a non-empty relative path");
     }
+    if cfg!(windows)
+        && let Some(reason) = windows_violation(relative)
+    {
+        return fail(format!(
+            "path escapes the served folder ({reason}): {relative}"
+        ));
+    }
     let candidate = Path::new(relative);
     let escapes = candidate.components().any(|part| {
         matches!(
@@ -58,13 +65,13 @@ pub(crate) fn resolve(workdir: &Path, relative: &str) -> Result<PathBuf, Operati
     if escapes {
         return fail(format!("path escapes the served folder: {relative}"));
     }
-    let root = workdir.canonicalize()?;
+    let root = dunce::canonicalize(workdir)?;
     // The tail may not exist yet: canonicalize the deepest part that does.
     let full = root.join(candidate);
     let mut existing = full.as_path();
     let mut missing: Vec<&std::ffi::OsStr> = Vec::new();
     let resolved = loop {
-        match existing.canonicalize() {
+        match dunce::canonicalize(existing) {
             Ok(found) => {
                 break missing
                     .iter()
@@ -87,7 +94,7 @@ pub(crate) fn resolve(workdir: &Path, relative: &str) -> Result<PathBuf, Operati
             Err(error) => return Err(error.into()),
         }
     };
-    if !resolved.starts_with(&root) {
+    if !contained(&root, &resolved, cfg!(windows)) {
         return fail(format!("path escapes the served folder: {relative}"));
     }
     Ok(resolved)
@@ -113,28 +120,15 @@ async fn read_tail(mut stream: impl AsyncRead + Unpin) -> (Vec<u8>, usize) {
 
 fn stream_text((tail, total): (Vec<u8>, usize)) -> String {
     let body = String::from_utf8_lossy(&tail);
+    let body = platform::clean_output(body.into_owned());
     if total > MAX_STREAM_BYTES {
         format!("[truncated]\n{body}")
     } else {
-        body.into_owned()
+        body
     }
 }
 
-/// No `unsafe` and no libc: the system's `kill` signals the process group.
-async fn kill_group(pid: u32) {
-    let status = Command::new("/bin/kill")
-        .args(["-KILL", "--", &format!("-{pid}")])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .await;
-    if status.is_err() {
-        // /bin/kill is part of every supported system; the child's own kill_on_drop remains.
-        eprintln!("warning: could not signal process group {pid}");
-    }
-}
-
-/// `/bin/bash -c <script>` in its own process group; a timeout or a cancel kills the group.
+/// The script in the OS shell (bash, or PowerShell on Windows); a timeout or a cancel kills the tree.
 async fn run_script(
     workdir: &Path,
     request: &ScriptRequest,
@@ -147,18 +141,17 @@ async fn run_script(
             request.working_directory
         ));
     }
-    let mut command = Command::new("/bin/bash");
+    platform::script_fits(&request.script).map_err(OperationFailure)?;
+    let mut command = platform::script_command(&request.script);
     command
-        .args(["-c", &request.script])
         .current_dir(&sub)
         .env_clear()
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .process_group(0)
         .kill_on_drop(true);
     // Only the basics pass through, so the worker's own token never reaches a script.
-    for name in ["PATH", "HOME", "LANG", "TERM", "USER", "TMPDIR"] {
+    for name in platform::SCRIPT_ENV {
         if let Some(value) = std::env::var_os(name) {
             command.env(name, value);
         }
@@ -190,7 +183,7 @@ async fn run_script(
         Some(status) => Some(status),
         None => {
             if let Some(pid) = pid {
-                kill_group(pid).await;
+                platform::kill_tree(pid).await;
             }
             tokio::time::timeout(DRAIN, child.wait())
                 .await
@@ -291,7 +284,7 @@ pub(crate) fn fnmatch(pattern: &str, name: &str) -> bool {
     go(&pattern, &name)
 }
 
-/// Regular files only: a symlink inside the folder may point outside it.
+/// Regular files only: a symlink (or Windows junction) inside the folder may point outside it.
 fn bounded_files(workdir: &Path, pattern: Option<&str>) -> Result<Vec<PathBuf>, OperationFailure> {
     let mut files = Vec::new();
     let mut seen = 0_usize;
@@ -301,7 +294,8 @@ fn bounded_files(workdir: &Path, pattern: Option<&str>) -> Result<Vec<PathBuf>, 
         entries.sort_by_key(fs::DirEntry::file_name);
         for entry in entries {
             let kind = entry.file_type()?;
-            if kind.is_dir() {
+            let link = platform::is_link(&entry, &kind);
+            if !link && kind.is_dir() {
                 stack.push(entry.path());
                 continue;
             }
@@ -312,7 +306,7 @@ fn bounded_files(workdir: &Path, pattern: Option<&str>) -> Result<Vec<PathBuf>, 
             if seen > MAX_SEARCH_ENTRIES {
                 return fail("search exceeds the entry cap");
             }
-            if !kind.is_symlink() {
+            if !link {
                 files.push(entry.path());
             }
         }
@@ -321,10 +315,17 @@ fn bounded_files(workdir: &Path, pattern: Option<&str>) -> Result<Vec<PathBuf>, 
 }
 
 fn relative_to(root: &Path, path: &Path) -> String {
-    path.strip_prefix(root)
+    let text = path
+        .strip_prefix(root)
         .unwrap_or(path)
         .display()
-        .to_string()
+        .to_string();
+    // Paths go back to the server and the model with `/`, the form every request uses.
+    if cfg!(windows) {
+        text.replace('\\', "/")
+    } else {
+        text
+    }
 }
 
 fn read_file(
@@ -334,7 +335,7 @@ fn read_file(
     let target = resolve(workdir, &request.path)?;
     regular_file(&target)?;
     let file = fs::File::open(&target)?;
-    let size_bytes = file.metadata()?.size();
+    let size_bytes = file.metadata()?.len();
     let mut data = Vec::new();
     file.take(MAX_READ_BYTES + 1).read_to_end(&mut data)?;
     let truncated = size_bytes > MAX_READ_BYTES
@@ -383,11 +384,11 @@ fn grep(
     let Some(pattern) = request.pattern.as_deref().filter(|p| !p.is_empty()) else {
         return fail("grep needs a pattern");
     };
-    let root = workdir.canonicalize()?;
+    let root = dunce::canonicalize(workdir)?;
     let mut matches = Vec::new();
     let mut seen = 0_u64;
     for path in bounded_files(&root, None)? {
-        let size = fs::metadata(&path)?.size();
+        let size = fs::metadata(&path)?.len();
         if size > MAX_SEARCH_BYTES.saturating_sub(seen) {
             continue;
         }
@@ -461,7 +462,7 @@ fn run_file_operation(
             })
         }
         FileAction::Glob => {
-            let root = workdir.canonicalize()?;
+            let root = dunce::canonicalize(workdir)?;
             let pattern = request.pattern.as_deref().unwrap_or("*");
             let matches = bounded_files(&root, Some(pattern))?
                 .iter()

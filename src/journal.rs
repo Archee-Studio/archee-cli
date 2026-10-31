@@ -8,6 +8,7 @@
 use std::collections::BTreeMap;
 use std::fs;
 use std::io::Write;
+#[cfg(unix)]
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -72,12 +73,12 @@ impl Journal {
         let mut line = serde_json::to_vec(record)
             .map_err(|e| CliError::new("internal", format!("journal encode: {e}")))?;
         line.push(b'\n');
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .mode(0o600) // results can hold what a command printed
-            .open(&self.path)
-            .map_err(fail)?;
+        let mut options = fs::OpenOptions::new();
+        options.create(true).append(true);
+        // Results can hold what a command printed. On Windows the profile's folder ACL covers this.
+        #[cfg(unix)]
+        options.mode(0o600);
+        let mut file = options.open(&self.path).map_err(fail)?;
         file.write_all(&line)
             .and_then(|()| file.sync_all())
             .map_err(fail)

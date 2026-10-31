@@ -2,12 +2,13 @@
 
 use std::fs;
 use std::io::Write;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use crate::output::{CliError, EXIT_USAGE};
+use crate::paths::contained;
+use crate::platform;
 
 const STATE_ENV: &str = "ARCHEE_CLI_HOME";
 
@@ -35,24 +36,22 @@ pub(crate) fn state_root() -> Result<PathBuf, CliError> {
     if let Some(value) = std::env::var_os(STATE_ENV).filter(|v| !v.is_empty()) {
         return Ok(PathBuf::from(value));
     }
-    let home = std::env::var_os("HOME")
-        .ok_or_else(|| CliError::new("state", "HOME is not set; set ARCHEE_CLI_HOME"))?;
-    Ok(PathBuf::from(home).join(".local/state/archee-cli"))
+    platform::default_state_root()
 }
 
-/// Written 0600 from the first byte; a rename keeps a reader from seeing half a file.
+/// Written 0600 from the first byte (Windows: an owner-only ACL before any byte).
+/// A rename keeps a reader from seeing half a file.
 fn write_private(path: &Path, data: &[u8]) -> Result<(), CliError> {
     let fail = |e: std::io::Error| CliError::io(&format!("could not write {}", path.display()), &e);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(fail)?;
     }
     let temp = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4().simple()));
-    let mut file = fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .mode(0o600)
+    let mut options = fs::OpenOptions::new();
+    let mut file = platform::private_mode(options.write(true).create_new(true))
         .open(&temp)
         .map_err(fail)?;
+    platform::restrict_to_owner(&temp).map_err(fail)?;
     file.write_all(data)
         .and_then(|()| file.sync_all())
         .map_err(fail)?;
@@ -92,7 +91,7 @@ pub(crate) fn clear_session() -> Result<(), CliError> {
 
 /// The worker's own state must never live inside the folder it serves.
 pub(crate) fn ensure_outside(workdir: &Path, state: &Path) -> Result<(), CliError> {
-    if state.starts_with(workdir) {
+    if contained(workdir, state, cfg!(windows)) {
         return Err(CliError::new(
             "state",
             format!(
@@ -138,7 +137,7 @@ impl StoredCredential {
     /// A chat bound to this outpost must stay in its folder, so no other folder may take over.
     pub(crate) fn ensure_serves(&self, outpost: &str, folder: &Path) -> Result<(), CliError> {
         match self.folder.as_deref() {
-            Some(own) if Path::new(own) != folder => Err(CliError::new(
+            Some(own) if !same_folder(Path::new(own), folder) => Err(CliError::new(
                 "usage",
                 format!("outpost {outpost} serves {own}, not {}", folder.display()),
             )
@@ -161,15 +160,36 @@ pub(crate) fn load_credential(outpost: &str) -> Result<StoredCredential, CliErro
         .map_err(|e| CliError::new("state", format!("stored credential is unusable: {e}")))
 }
 
-/// The served folder's identity: device and inode, so a replaced folder is a different folder.
+/// Windows folder names ignore letter case.
+fn same_folder(left: &Path, right: &Path) -> bool {
+    contained(left, right, cfg!(windows)) && contained(right, left, cfg!(windows))
+}
+
+/// The served folder's identity: see `platform::folder_identity`.
 pub(crate) fn workdir_id(folder: &Path) -> Result<String, CliError> {
-    use std::os::unix::fs::MetadataExt;
-    let info = fs::metadata(folder).map_err(|e| CliError::io("could not read the folder", &e))?;
-    Ok(format!("{}-{}", info.dev(), info.ino()))
+    platform::folder_identity(folder).map_err(|e| CliError::io("could not read the folder", &e))
 }
 
 #[cfg(test)]
 mod tests {
+    /// A file under a shared root must not inherit that root's ACL.
+    #[cfg(windows)]
+    #[test]
+    fn a_private_file_keeps_no_inherited_access_on_windows() {
+        let dir =
+            std::env::temp_dir().join(format!("archee-acl-{}", uuid::Uuid::new_v4().simple()));
+        let file = dir.join("credential.json");
+        super::write_private(&file, b"secret").unwrap();
+        assert_eq!(std::fs::read(&file).unwrap(), b"secret");
+        let acl = std::process::Command::new("icacls")
+            .arg(&file)
+            .output()
+            .unwrap();
+        let acl = String::from_utf8_lossy(&acl.stdout).into_owned();
+        std::fs::remove_dir_all(&dir).unwrap();
+        assert!(!acl.contains("(I)"), "inherited access remains: {acl}");
+    }
+
     use std::path::Path;
 
     use super::StoredCredential;

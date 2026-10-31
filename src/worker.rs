@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::watch;
 
 use crate::api::{ApiError, Client};
@@ -15,6 +14,7 @@ use crate::journal::{Journal, JournalReceipt};
 use crate::models::{ClaimedAssignment, OperationEnvelope, OperationResult};
 use crate::operations::execute;
 use crate::output::{CliError, EXIT_AUTH, EXIT_USAGE};
+use crate::platform::Signals;
 use crate::rfc3339::epoch_seconds;
 use crate::state::{
     StoredCredential, ensure_outside, instance_id, load_credential, save_credential, state_root,
@@ -355,20 +355,16 @@ impl From<CliError> for Failure {
     }
 }
 
-/// SIGTERM or SIGINT: finish the running operation, then drain. A second one kills it.
+/// SIGTERM or SIGINT (Windows: Ctrl-C or closing the console): finish the running operation, then drain. A second one kills it.
 fn drain_on_signals(
     draining: watch::Sender<bool>,
     lease_lost: watch::Sender<bool>,
 ) -> Result<(), CliError> {
     let fail = |e: std::io::Error| CliError::io("could not watch for signals", &e);
-    let mut terminate = signal(SignalKind::terminate()).map_err(fail)?;
-    let mut interrupt = signal(SignalKind::interrupt()).map_err(fail)?;
+    let mut signals = Signals::new().map_err(fail)?;
     tokio::spawn(async move {
         for presses in 0.. {
-            tokio::select! {
-                _ = terminate.recv() => {}
-                _ = interrupt.recv() => {}
-            }
+            signals.recv().await;
             if presses == 0 {
                 eprintln!("disconnecting after the running command; press Ctrl-C again to stop it");
                 draining.send_replace(true);
@@ -384,8 +380,7 @@ fn drain_on_signals(
 
 /// The folder to serve, checked: it exists and the worker's own state is not inside it.
 pub(crate) fn served_folder(workdir: &str) -> Result<PathBuf, CliError> {
-    let folder = Path::new(workdir)
-        .canonicalize()
+    let folder = dunce::canonicalize(workdir)
         .ok()
         .filter(|path| path.is_dir())
         .ok_or_else(|| {
