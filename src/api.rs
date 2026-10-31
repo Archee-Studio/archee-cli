@@ -42,9 +42,12 @@ impl From<ApiError> for CliError {
                 format!("could not reach {PRODUCT_NAME}: {detail}"),
             )
             .next("check the connection and ARCHEE_URL, then retry"),
-            ApiError::Decode(detail) => {
-                CliError::new("api", format!("unexpected answer: {detail}"))
-            }
+            // Also what a sign-in gate in front of the server looks like: a web page, not JSON.
+            ApiError::Decode(detail) => CliError::new(
+                "api",
+                format!("{PRODUCT_NAME} sent an answer this CLI cannot read: {detail}"),
+            )
+            .next("your account may not have access yet; otherwise run `archee update` and retry"),
         }
     }
 }
