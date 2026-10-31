@@ -54,7 +54,7 @@ dependencies = [
 
 [[package]]
 name = "archee-cli"
-version = "11.20.0"
+version = "11.20.1"
 dependencies = [
  "clap",
  "dunce",
