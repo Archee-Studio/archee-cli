@@ -107,10 +107,16 @@ pub(crate) fn ensure_outside(workdir: &Path, state: &Path) -> Result<(), CliErro
 /// One stable id per outpost on this machine: the server lets an id serve one outpost only.
 pub(crate) fn instance_id(outpost: &str) -> Result<String, CliError> {
     let marker = state_root()?.join("instances").join(outpost);
-    if let Ok(existing) = fs::read_to_string(&marker) {
-        let existing = existing.trim();
-        if !existing.is_empty() {
-            return Ok(existing.to_owned());
+    match fs::read_to_string(&marker) {
+        Ok(existing) if !existing.trim().is_empty() => return Ok(existing.trim().to_owned()),
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        // A fresh id would register a second outpost, so an unreadable marker stops here.
+        Err(e) => {
+            return Err(CliError::io(
+                &format!("could not read {}", marker.display()),
+                &e,
+            ));
         }
     }
     let fresh = uuid::Uuid::new_v4().simple().to_string();

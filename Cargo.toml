@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.99"
 name = "archee-cli"
-version = "11.20.2"
+version = "11.26.0"
 build = false
 include = [
     "/src/**",
@@ -82,9 +82,6 @@ features = [
 [dependencies.uuid]
 version = "1.29.0"
 features = ["v4"]
-
-[dev-dependencies.proptest]
-version = "1"
 
 [dev-dependencies.tempfile]
 version = "3"
