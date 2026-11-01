@@ -25,8 +25,6 @@ pub(crate) struct LoginPoll {
     pub(crate) token: Option<String>,
 }
 
-// -- outposts ------------------------------------------------------------------------------------
-
 #[derive(Debug, Serialize, Deserialize)]
 pub(crate) struct OutpostView {
     pub(crate) id: String,

@@ -191,8 +191,6 @@ impl Client {
         self.send(builder).await.map(|_| ())
     }
 
-    // -- user commands --------------------------------------------------------------------------
-
     pub(crate) async fn login_start(&self) -> Result<LoginStarted, ApiError> {
         self.post("/api/auth/cli/start", &empty()).await
     }
@@ -213,8 +211,6 @@ impl Client {
         self.get("/api/me").await
     }
 
-    // -- outposts -------------------------------------------------------------------------------
-
     pub(crate) async fn create_outpost(&self, name: &str) -> Result<OutpostView, ApiError> {
         self.post("/api/outposts", &serde_json::json!({"name": name}))
             .await
@@ -231,8 +227,6 @@ impl Client {
         self.post(&format!("/api/outposts/{id}/registrations"), &empty())
             .await
     }
-
-    // -- worker protocol ------------------------------------------------------------------------
 
     pub(crate) async fn exchange(
         &self,

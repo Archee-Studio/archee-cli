@@ -1,4 +1,4 @@
-//! Ported from the Python worker's `test_operations.py`: the same confinement and bounds.
+//! Confinement and bounds of the operations, mirrored from the Python worker contract.
 
 use std::path::Path;
 use std::time::{Duration, Instant};

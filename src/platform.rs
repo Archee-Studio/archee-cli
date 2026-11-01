@@ -1,7 +1,6 @@
 //! What differs between Unix and Windows: the shell, killing a command, signals, state locations.
 //!
 //! Each item has a `cfg(unix)` and a `cfg(windows)` body and the rest of the crate stays the same.
-//! The Unix bodies are the original code, moved here unchanged.
 
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
