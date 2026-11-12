@@ -6,6 +6,7 @@ use std::time::Duration;
 use crate::api::Client;
 use crate::cli::{Cli, Command};
 use crate::connect;
+use crate::login_poll::{Pacing, Poll, PollSource, wait_for_approval};
 use crate::output::{CliError, EXIT_AUTH, emit};
 use crate::state::{UserSession, clear_session, load_session, save_session};
 use crate::update;
@@ -60,6 +61,18 @@ pub(crate) fn home(cli: &Cli) -> Result<(), CliError> {
     emit(cli.json, &data, &text)
 }
 
+/// The real server as a poll source.
+struct ServerPoll<'a> {
+    client: &'a Client,
+    device_code: &'a str,
+}
+
+impl PollSource for ServerPoll<'_> {
+    async fn poll(&self) -> Poll {
+        Poll::from_reply(self.client.login_poll(self.device_code).await)
+    }
+}
+
 /// A device-code sign-in: prints the code and URL, polls, and returns the token unsaved.
 pub(crate) async fn device_token(url: &str) -> Result<String, CliError> {
     let client = Client::new(url, None)?;
@@ -69,15 +82,11 @@ pub(crate) async fn device_token(url: &str) -> Result<String, CliError> {
     if std::io::stdout().is_terminal() {
         open_browser(&started.verification_url);
     }
-    let wait = async {
-        loop {
-            tokio::time::sleep(Duration::from_secs(started.interval.max(1))).await;
-            let polled = client.login_poll(&started.device_code).await?;
-            if let Some(token) = polled.token {
-                return Ok::<String, CliError>(token);
-            }
-        }
+    let source = ServerPoll {
+        client: &client,
+        device_code: &started.device_code,
     };
+    let wait = wait_for_approval(&source, Pacing::new(started.interval));
     tokio::time::timeout(SIGN_IN_TIMEOUT, wait)
         .await
         .map_err(|_| {

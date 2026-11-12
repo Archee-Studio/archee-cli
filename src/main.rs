@@ -21,6 +21,7 @@ mod api;
 mod cli;
 mod connect;
 mod journal;
+mod login_poll;
 mod models;
 mod operations;
 #[cfg(test)]
