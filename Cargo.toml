@@ -13,11 +13,13 @@
 edition = "2024"
 rust-version = "1.99"
 name = "archee-cli"
-version = "13.116.0"
+version = "13.125.0"
+authors = ["Archee Studio"]
 build = false
 include = [
     "/src/**",
     "/README.md",
+    "/wix/**",
 ]
 publish = false
 autolib = false
@@ -33,6 +35,12 @@ repository = "https://github.com/Archee-Studio/archee-cli"
 
 [package.metadata.dist]
 dist = true
+
+[package.metadata.wix]
+upgrade-guid = "874DC1CE-FACA-45CE-9ABE-A162A734A419"
+path-guid = "26B27F63-40D9-4168-BFAF-9393DB373B17"
+license = false
+eula = false
 
 [[bin]]
 name = "archee"

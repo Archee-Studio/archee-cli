@@ -1,0 +1,56 @@
+# Custom cargo-dist publish job (publish-jobs in dist-workspace.toml): pushes the generated
+# Homebrew formula to the tap over SSH with a write deploy key on the tap repository.
+name: Publish Homebrew formula
+
+on:
+  workflow_call:
+    inputs:
+      plan:
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  publish-homebrew:
+    runs-on: ubuntu-latest
+    env:
+      PLAN: ${{ inputs.plan }}
+      GIT_SSH_COMMAND: ssh -i /tmp/tap-key -o IdentitiesOnly=yes -o UserKnownHostsFile=/tmp/tap-hosts -o StrictHostKeyChecking=yes
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          pattern: artifacts-*
+          path: formulae
+          merge-multiple: true
+      - name: Push the formula to the tap
+        env:
+          KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$KEY" ] || { echo "::error::secret HOMEBREW_TAP_DEPLOY_KEY is not set"; exit 1; }
+          umask 077
+          printf '%s\n' "$KEY" >/tmp/tap-key
+          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >/tmp/tap-hosts
+          # The tap may be empty (no commits): start main there, and push to main by name.
+          timeout 120 git clone git@github.com:Archee-Studio/homebrew-tap.git /tmp/tap
+          git -C /tmp/tap checkout -q -B main
+          mkdir -p /tmp/tap/Formula
+          version=$(echo "$PLAN" | jq -r '.announcement_tag')
+          found=0
+          for f in formulae/*.rb; do
+            [ -e "$f" ] || continue
+            found=1
+            cp "$f" "/tmp/tap/Formula/$(basename "$f")"
+          done
+          [ "$found" = 1 ] || { echo "::error::no formula in the release artifacts"; exit 1; }
+          cd /tmp/tap
+          git add Formula
+          if git diff --cached --quiet; then
+            echo "formula unchanged; nothing to push"
+          else
+            git -c user.name="shipbot" -c user.email="shipbot@archee.studio" commit -q -m "archee-cli ${version}"
+            timeout 120 git push origin main
+          fi
+          rm -f /tmp/tap-key
