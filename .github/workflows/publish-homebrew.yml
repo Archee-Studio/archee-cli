@@ -1,5 +1,5 @@
 # Custom cargo-dist publish job (publish-jobs in dist-workspace.toml): pushes the generated
-# Homebrew formula to the tap over SSH with a write deploy key on the tap repository.
+# Homebrew formula to the tap as shipbot, the Archee Shipbot GitHub App.
 name: Publish Homebrew formula
 
 on:
@@ -9,7 +9,7 @@ on:
         required: true
         type: string
 
-# No GITHUB_TOKEN scopes: the push uses the tap's deploy key. A called workflow may not ask for more
+# No GITHUB_TOKEN scopes: the push uses the shipbot App token. A called workflow may not ask for more
 # than its caller grants, and release.yml's publish job grants only id-token and packages.
 permissions: {}
 
@@ -18,24 +18,30 @@ jobs:
     runs-on: ubuntu-latest
     env:
       PLAN: ${{ inputs.plan }}
-      GIT_SSH_COMMAND: ssh -i /tmp/tap-key -o IdentitiesOnly=yes -o UserKnownHostsFile=/tmp/tap-hosts -o StrictHostKeyChecking=yes
     steps:
       - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
         with:
           pattern: artifacts-*
           path: formulae
           merge-multiple: true
+      - name: Mint the shipbot token
+        id: token
+        uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        with:
+          app-id: ${{ secrets.SHIPBOT_APP_ID }}
+          private-key: ${{ secrets.SHIPBOT_PRIVATE_KEY }}
+          owner: Archee-Studio
+          repositories: homebrew-tap
       - name: Push the formula to the tap
         env:
-          KEY: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
+          TOKEN: ${{ steps.token.outputs.token }}
         run: |
           set -euo pipefail
-          [ -n "$KEY" ] || { echo "::error::secret HOMEBREW_TAP_DEPLOY_KEY is not set"; exit 1; }
-          umask 077
-          printf '%s\n' "$KEY" >/tmp/tap-key
-          echo "github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl" >/tmp/tap-hosts
-          # The tap may be empty (no commits): start main there, and push to main by name.
-          timeout 120 git clone git@github.com:Archee-Studio/homebrew-tap.git /tmp/tap
+          # The token rides in a per-command header, never in .git/config.
+          auth=$(printf 'x-access-token:%s' "$TOKEN" | base64 -w0); echo "::add-mask::$auth"
+          # The tap is public, so the clone needs no credential. It may be empty (no commits):
+          # start main there, and push to main by name.
+          timeout 120 git clone https://github.com/Archee-Studio/homebrew-tap.git /tmp/tap
           git -C /tmp/tap checkout -q -B main
           mkdir -p /tmp/tap/Formula
           version=$(echo "$PLAN" | jq -r '.announcement_tag')
@@ -51,7 +57,6 @@ jobs:
           if git diff --cached --quiet; then
             echo "formula unchanged; nothing to push"
           else
-            git -c user.name="shipbot" -c user.email="shipbot@archee.studio" commit -q -m "archee-cli ${version}"
-            timeout 120 git push origin main
+            git -c user.name="archee-shipbot[bot]" -c user.email="356176739+archee-shipbot[bot]@users.noreply.github.com" commit -q -m "archee-cli ${version}"
+            timeout 120 git -c http.extraheader="AUTHORIZATION: basic $auth" push origin main
           fi
-          rm -f /tmp/tap-key
