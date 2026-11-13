@@ -9,8 +9,9 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: read
+# No GITHUB_TOKEN scopes: the push uses the tap's deploy key. A called workflow may not ask for more
+# than its caller grants, and release.yml's publish job grants only id-token and packages.
+permissions: {}
 
 jobs:
   publish-homebrew:
