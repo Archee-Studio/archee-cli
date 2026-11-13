@@ -13,7 +13,7 @@
 edition = "2024"
 rust-version = "1.99"
 name = "archee-cli"
-version = "13.90.0"
+version = "13.116.0"
 build = false
 include = [
     "/src/**",
