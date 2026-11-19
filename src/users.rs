@@ -89,7 +89,7 @@ pub(crate) async fn device_token(url: &str) -> Result<String, CliError> {
     let wait = wait_for_approval(&source, Pacing::new(started.interval));
     tokio::time::timeout(SIGN_IN_TIMEOUT, wait)
         .await
-        .map_err(|_| {
+        .map_err(|_elapsed| {
             CliError::new("timeout", "the sign-in was not approved in time").next("archee login")
         })?
 }

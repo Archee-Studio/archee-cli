@@ -155,7 +155,7 @@ impl StoredCredential {
 }
 
 pub(crate) fn load_credential(outpost: &str) -> Result<StoredCredential, CliError> {
-    let raw = fs::read(credential_path(outpost)?).map_err(|_| {
+    let raw = fs::read(credential_path(outpost)?).map_err(|_not_stored| {
         CliError::new(
             "no_credential",
             format!("no stored credential for outpost {outpost}"),

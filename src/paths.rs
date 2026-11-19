@@ -9,15 +9,15 @@ use std::path::Path;
 
 /// `FILE_ATTRIBUTE_REPARSE_POINT`: junctions, symlinks and mount points all carry it.
 #[cfg_attr(
-    not(windows),
-    allow(dead_code, reason = "used by the Windows build; tested everywhere")
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "used by the Windows build; tested everywhere")
 )]
 const REPARSE_POINT: u32 = 0x400;
 
 /// Whether file attributes mark a reparse point, which a scan must not walk through.
 #[cfg_attr(
-    not(windows),
-    allow(dead_code, reason = "used by the Windows build; tested everywhere")
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "used by the Windows build; tested everywhere")
 )]
 pub(crate) const fn reparse_flag(attributes: u32) -> bool {
     attributes & REPARSE_POINT != 0
@@ -89,8 +89,8 @@ pub(crate) fn contained(root: &Path, path: &Path, fold: bool) -> bool {
 /// A stable 64-bit FNV-1a digest of the normalized folder path, as 16 hex digits. Windows has no
 /// device and inode to cheaply read without `unsafe`, so a replaced folder is not detected there.
 #[cfg_attr(
-    not(windows),
-    allow(dead_code, reason = "used by the Windows build; tested everywhere")
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "used by the Windows build; tested everywhere")
 )]
 pub(crate) fn path_digest(folder: &Path) -> String {
     let normal = folder.to_string_lossy().replace('\\', "/").to_lowercase();

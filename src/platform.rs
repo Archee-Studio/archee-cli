@@ -36,8 +36,8 @@ const WINDOWS_SCRIPT_UNITS: usize = 30_000;
 
 /// The PowerShell arguments for one script: no profile, no prompts, UTF-8 out.
 #[cfg_attr(
-    not(windows),
-    allow(dead_code, reason = "used by the Windows build; tested everywhere")
+    all(not(windows), not(test)),
+    expect(dead_code, reason = "used by the Windows build; tested everywhere")
 )]
 pub(crate) fn powershell_args(script: &str) -> Vec<String> {
     // The console code page is OEM by default; pipes would otherwise carry mangled text.

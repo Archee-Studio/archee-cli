@@ -117,8 +117,10 @@ impl Client {
             HeaderValue::from_static(CLI_VERSION),
         );
         if let Some(token) = token {
-            let mut value = HeaderValue::from_str(&format!("Bearer {token}"))
-                .map_err(|_| CliError::new("usage", "the token has invalid characters"))?;
+            let mut value =
+                HeaderValue::from_str(&format!("Bearer {token}")).map_err(|_invalid_header| {
+                    CliError::new("usage", "the token has invalid characters")
+                })?;
             value.set_sensitive(true);
             headers.insert(reqwest::header::AUTHORIZATION, value);
         }
